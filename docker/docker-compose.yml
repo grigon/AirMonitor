@@ -1,0 +1,44 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  influxdb:
+    image: influxdb:2
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+
+  grafana:
+    image: grafana/grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=smtp.gmail.com:587
+      - GF_SMTP_USER=your@gmail.com
+      - GF_SMTP_PASSWORD=your_app_password
+      - GF_SMTP_FROM_ADDRESS=your@gmail.com
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  telegraf:
+    image: telegraf
+    restart: unless-stopped
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf
+
+volumes:
+  mosquitto_data:
+  mosquitto_logs:
+  influxdb_data:
+  grafana_data:

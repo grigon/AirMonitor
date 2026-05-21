@@ -1,0 +1,29 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.*
+*.secret
+
+# Docker volumes / local data
+mosquitto_data/
+influxdb_data/
+grafana_data/
+
+# Arduino build artifacts
+*.elf
+*.hex
+*.bin
+build/
+
+# Logs
+*.log
+logs/
