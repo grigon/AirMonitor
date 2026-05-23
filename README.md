@@ -33,18 +33,6 @@ Built for a flat where a Bambu Lab P2S runs PETG and other filaments regularly.
 
 ---
 
-## 3D Printed Case
-
-The enclosure is designed to keep the SPS30 airflow inlet unobstructed while housing the ESP32 and SGP41. Print file: [`case/airmonitor.stl`](case/airmonitor.stl)
-
-![3D Model](case/model.png)
-
-| | |
-|---|---|
-| ![Case front](case/IMG_4733.jpeg) | ![Case back](case/IMG_4734.jpeg) |
-
----
-
 ## Architecture
 
 ```
@@ -229,9 +217,52 @@ environment:
 ```
 
 2. In Grafana: **Alerting → Contact points → Add contact point → Email**
-3. Create alert rules with thresholds, e.g. PM2.5 > 15 µg/m³
+3. Create alert rules using the queries below
 
 For Gmail, generate an App Password at `https://myaccount.google.com/apppasswords`.
+
+### Alert Queries
+
+Use time-windowed averages to avoid false alarms from momentary spikes.
+
+**PM2.5** — 30-minute mean (practical for 3D printing; WHO norm is 24h but too slow for episode detection):
+
+```flux
+from(bucket: "airmonitor")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "mqtt_consumer")
+  |> filter(fn: (r) => r._field == "pm25")
+  |> mean()
+```
+
+Threshold: warning `> 15`, alarm `> 35` (µg/m³)
+
+**VOC Index** — 15-minute mean (reacts quickly to filament/solvent emissions):
+
+```flux
+from(bucket: "airmonitor")
+  |> range(start: -15m)
+  |> filter(fn: (r) => r._measurement == "mqtt_consumer")
+  |> filter(fn: (r) => r._field == "voc")
+  |> mean()
+```
+
+Threshold: warning `> 150`, alarm `> 250`
+
+**NOx Index** — 30-minute mean (more stable, slower to change):
+
+```flux
+from(bucket: "airmonitor")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "mqtt_consumer")
+  |> filter(fn: (r) => r._field == "nox")
+  |> mean()
+```
+
+Threshold: warning `> 125`, alarm `> 150`
+
+> **Why different time windows?**
+> PM2.5 and NOx change slowly — a 30-minute window smooths noise without losing important trends. VOC reacts faster to short-lived events like filament off-gassing, so a 15-minute window catches episodes before they pass. Using instantaneous readings without mean() causes false alarms from single noisy data points.
 
 ---
 
@@ -246,21 +277,62 @@ For Gmail, generate an App Password at `https://myaccount.google.com/apppassword
 
 ## Air Quality Reference
 
-| PM2.5 (µg/m³) | WHO Rating |
-| ------------- | ---------- |
-| 0–5           | Excellent  |
-| 5–15          | Good       |
-| 15–35         | Moderate   |
-| 35–75         | Poor       |
-| >75           | Hazardous  |
+### WHO Air Quality Guidelines (2021)
 
-| VOC / NOx Index | Sensirion Rating     |
-| --------------- | -------------------- |
-| 1–50            | Excellent            |
-| 51–100          | Good (baseline ~100) |
-| 101–200         | Moderate             |
-| 201–400         | Poor                 |
-| >400            | Hazardous            |
+| Pollutant | Annual mean | 24-hour mean |
+| --------- | ----------- | ------------ |
+| **PM2.5** | 5 µg/m³     | 15 µg/m³     |
+| **PM10**  | 15 µg/m³    | 45 µg/m³     |
+| **NO2**   | 10 µg/m³    | 25 µg/m³     |
+
+> Source: [WHO Global Air Quality Guidelines 2021](https://www.who.int/publications/i/item/9789240034228)
+
+### PM2.5 Levels
+
+| PM2.5 (µg/m³) | Level     | Notes                                 |
+| ------------- | --------- | ------------------------------------- |
+| 0–5           | Excellent | Below WHO annual mean                 |
+| 5–15          | Good      | Below WHO 24h guideline               |
+| 15–35         | Moderate  | Exceeds WHO 24h guideline — ventilate |
+| 35–75         | Poor      | EU limit for daily average            |
+| >75           | Hazardous | Immediate action recommended          |
+
+### VOC & NOx Index (Sensirion Scale)
+
+Sensirion's Gas Index Algorithm outputs a value from 1–500 where **100 = typical clean indoor air baseline**. There is no single WHO standard for VOC as a category.
+
+| Index   | Level                                 |
+| ------- | ------------------------------------- |
+| 1–50    | Excellent                             |
+| 51–100  | Good (calibrating baseline)           |
+| 101–200 | Moderate — increased VOC/NOx detected |
+| 201–400 | Poor — ventilate                      |
+| >400    | Hazardous                             |
+
+### Recommended Alert Thresholds
+
+Based on WHO guidelines, Sensirion documentation, and 3D printing research:
+
+| Metric    | Typical indoor range | Warning   | Alarm     |
+| --------- | -------------------- | --------- | --------- |
+| PM2.5     | 0–10 µg/m³           | >15 µg/m³ | >35 µg/m³ |
+| PM10      | 0–20 µg/m³           | >45 µg/m³ | >75 µg/m³ |
+| VOC Index | 80–120               | >150      | >250      |
+| NOx Index | 95–105               | >125      | >150      |
+
+> **Why different thresholds for VOC and NOx?**
+> VOC Index reacts to a broad range of organic compounds (solvents, filaments, cooking, cleaning products) and has more natural variation. NOx Index is much more stable in typical homes — values above 150 indicate a serious source of nitrogen oxides (combustion, heavy printing). NOx alarm threshold is set lower because elevated NOx is more immediately concerning.
+
+### 3D Printing Context
+
+Studies on FDM printing emissions show:
+
+- **PLA**: relatively low emissions, typically +10–20 µg/m³ PM2.5 near the printer
+- **PETG**: moderate emissions, higher VOC than PLA
+- **ABS**: high emissions — significant UFP and styrene release
+- **TPU**: variable, can be significant
+
+Ventilation is strongly recommended when PM2.5 exceeds 25 µg/m³ during printing.
 
 ---
 
