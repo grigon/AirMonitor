@@ -2,7 +2,7 @@
 
 This document summarises a 25-day study (16 May – 11 June 2026) using the monitor in this repo, correlating PM2.5 with Bambu Lab P2S printer activity. Full methodology and statistics are in the accompanying report.
 
-> **TL;DR** — Printing PLA/PETG barely raised PM2.5 above the room's normal background, with or without the VentoBox filter. The biggest pollution events came from outside the printer (cooking / outdoor air). PETG emits about 2× the particulates of PLA, but both stayed at or below baseline. Gas-phase (VOC/NOx) data was lost to a firmware bug, now fixed — that's the next chapter.
+> **TL;DR** — Printing PLA/PETG barely raised PM2.5 above the room's normal background, with or without the VentoBox filter. The biggest particulate events came from outside the printer (cooking / outdoor air). **But once the gas sensor was fixed, the picture changed: VOC rises sharply during printing (+78 index points, p ≈ 7×10⁻¹⁴) — a signal the particle sensor was completely blind to.**
 
 ---
 
@@ -61,11 +61,45 @@ Eight of the ten highest PM2.5 readings happened while the nozzle was cold. They
 
 ![Hourly pattern](docs/plot_hourly.png)
 
+## Finding 5 — Gases tell a completely different story
+
+The first phase had no usable VOC/NOx data. After fixing three separate faults (irregular 1 Hz sampling, a cold solder joint on the sensor's power pin, and transposed algorithm-type constants), a second dataset was collected 25 July – 17 August 2026.
+
+This is where the interesting result lives:
+
+| Channel | Printing | Idle | Difference | p |
+|---------|----------|------|------------|---|
+| **VOC Index** | 196 | 118 | **+78** | 7×10⁻¹⁴ |
+| PM2.5 | 3.2 µg/m³ | 4.1 µg/m³ | −0.9 | 5×10⁻⁵ |
+| NOx Index | 1 | 1 | 0 | — |
+
+![VOC vs PM2.5](docs/plot_gas_vs_pm.png)
+
+*The VOC distribution shifts strongly upward during printing; PM2.5 does not.*
+
+During printing, VOC exceeded 150 **66% of the time** and 250 **36%** — but with the printer *off* those same thresholds were crossed 39% and 21% of the time. The elevation is real, but the distributions overlap heavily.
+
+**Important — what VOC Index is not.** It's not a concentration. The SGP41 produces one signal responding to oxidisable gases collectively, and Sensirion's algorithm converts it to a 1–500 index where 100 = this room's own typical state over the past ~24h. So 200 means "more than usual here," not any µg/m³. VOCs are hundreds of compounds with wildly different toxicity (benzene is carcinogenic; limonene from citrus isn't), which is why **WHO publishes guidelines per compound, not for VOCs as a group** — no threshold here corresponds to a health standard.
+
+The 150/250 thresholds were provisional values picked before any data existed. The data shows they're too low for this room: the idle distribution alone has a 90th percentile of **373**. Better thresholds would come from the room's own idle distribution (e.g. warning 373, alarm 432). That's a monitoring-config fix, not a health finding.
+
+NOx stayed at baseline — expected, since FDM printing doesn't produce nitrogen oxides.
+
+![VOC timeline](docs/plot_voc_timeline.png)
+
+**What this means for the filter question:** Finding 2 concluded no PM2.5 benefit from the VentoBox could be demonstrated. The gas data confirms there genuinely *is* a gas-phase signal for an activated-carbon filter to work on. But it doesn't quantify the filter's effect — it ran at 100% continuously through this window, so there's no unfiltered comparison. That needs a deliberate on/off experiment.
+
+**Material comparison stays inconclusive.** Classification was revised (nozzle temperature alone: 195–235 °C = PLA, 235–265 °C = PETG — the old rule requiring a 65 °C+ bed misclassified prints run at 245 °C with a 60 °C bed). In this window PLA had only 39 samples against 240 for PETG. Both raised VOC substantially (+100 and +76), but the difference between them wasn't significant (p = 0.07) and the imbalance is too large to conclude anything.
+
+**Reliability after the fixes:** restarts fell from 29 in 25 days to **two in a month**.
+
+---
+
 ---
 
 ## What the data could NOT show (and why)
 
-- **VOC / NOx:** values sat pinned at their initialisation baseline (VOC = 1, NOx = 100) for the entire dataset — even across a 30-hour continuous run. Root cause: the Sensirion gas-index algorithm needs to be called at a steady 1 Hz, but the original firmware called it irregularly, so it never built its baseline. **Fixed** by sampling the gas sensor on a dedicated 1-second timer independent of everything else. Fresh gas data is the next analysis.
+- **VOC / NOx (phase 1):** values sat pinned at their initialisation baseline for the entire first dataset. Three faults were eventually found — irregular algorithm sampling, a cold solder joint intermittently cutting sensor power, and transposed algorithm-type constants. All fixed; results in Finding 5 below.
 - **Device stability:** 29 restarts over the period. Diagnostic logging (heap, RSSI, CPU temp, boot reason) showed free heap rock-stable (never below 219 KB) — no memory leak. Restarts were interrupt-watchdog resets from occasional I2C/network blocking, now mitigated with an I2C timeout, bounded reconnects, and regular watchdog servicing.
 - **No outdoor reference** sensor, so indoor-vs-outdoor attribution is inferred, not measured.
 
@@ -83,9 +117,11 @@ The sensor lives in a custom 3D-printed enclosure (redesigned for better airflow
 
 ## Takeaways
 
-1. In a normally-ventilated room, FDM printing with PLA/PETG had a negligible effect on measurable PM2.5.
-2. PETG roughly doubles PM2.5 vs PLA — still low in absolute terms here.
-3. A filter's PM2.5 benefit is genuinely hard to prove when printing adds so little to begin with; its real value is in gases and ultrafine particles, which need different instrumentation.
-4. Honest measurement means controlling for confounders — the biggest "result" in v1 of this analysis turned out to be the weather.
+1. **Measure the right thing.** Particulates showed nothing; gases showed a clear signal. A PM-only monitor would have concluded "3D printing doesn't affect the air" — and missed the only channel that responds at all. (Whether that signal matters for health is a separate question this sensor can't answer.)
+2. In a normally-ventilated room, FDM printing with PLA/PETG had a negligible effect on measurable PM2.5.
+3. PETG roughly doubles PM2.5 vs PLA — still low in absolute terms. For VOC, no significant difference was found (small PLA sample).
+4. A filter's PM2.5 benefit is hard to prove when printing adds so little to begin with. The gas data shows what it's actually for — but quantifying that needs a matched on/off experiment.
+5. Honest measurement means controlling for confounders — the biggest "result" in v1 of this analysis turned out to be the weather.
+6. **Log raw sensor signals, not just processed indices.** The gas-index algorithm is stateful and non-invertible, so a month of mislabelled data could not be recovered after the fact.
 
 *Full report with complete statistics and methodology: see `Air_Quality_3D_Printing_Report.docx`.*
